@@ -10,7 +10,7 @@ interface RegisteredComponents {
 }
 
 interface Props {
-  [key: string]: string;
+  [key: string]: any;
 }
 
 interface Options {
@@ -86,19 +86,129 @@ export const getCleanPropName = (raw: string): string => {
     .replace(/-./g, (x) => x.toUpperCase()[1]);
 };
 
+/**
+ * Resolves a nested path on the global window object
+ * @param path - String path like "window.myGlobalFunction" or "window.App.services.logger"
+ * @returns The resolved value or undefined if the path cannot be resolved
+ */
+const resolveGlobalReference = (path: string): unknown => {
+  // Remove "window." prefix if present (for convenience)
+  const cleanPath = path.startsWith('window.') ? path.slice(7) : path;
+  
+  // Split by dots and traverse the object
+  const parts = cleanPath.split('.');
+  let current: unknown = window;
+  
+  for (const part of parts) {
+    if (current === null || current === undefined) {
+      return undefined;
+    }
+    // Type guard: check if current is an object with index signature
+    if (typeof current === 'object' && current !== null) {
+      current = (current as Record<string, unknown>)[part];
+    } else {
+      return undefined;
+    }
+    if (current === undefined) {
+      return undefined;
+    }
+  }
+  
+  return current;
+};
+
+/**
+ * Extracts and parses numeric props from data-n-prop-* attributes
+ * @param el - The element to extract numeric props from
+ * @returns Object with camelCase prop names and numeric values
+ */
+const getNumericProps = (el: Element): { [key: string]: number } => {
+  const numericProps: { [key: string]: number } = {};
+  const attributes = Array.from(el.attributes);
+  
+  for (const attr of attributes) {
+    if (attr.name.startsWith('data-n-prop-')) {
+      // Convert data-n-prop-* to data-prop-* format for getCleanPropName
+      const propName = getCleanPropName(attr.name.replace('data-n-prop-', 'data-prop-'));
+      numericProps[propName] = Number(attr.value);
+    }
+  }
+  
+  return numericProps;
+};
+
+/**
+ * Extracts and resolves reference props from data-r-prop-* attributes
+ * @param el - The element to extract reference props from
+ * @returns Object with camelCase prop names and resolved values
+ */
+const getReferenceProps = (el: Element): { [key: string]: unknown } => {
+  const referenceProps: { [key: string]: unknown } = {};
+  const attributes = Array.from(el.attributes);
+  
+  for (const attr of attributes) {
+    if (attr.name.startsWith('data-r-prop-')) {
+      // Convert data-r-prop-* to data-prop-* format for getCleanPropName
+      const propName = getCleanPropName(attr.name.replace('data-r-prop-', 'data-prop-'));
+      const resolved = resolveGlobalReference(attr.value);
+      
+      if (resolved === undefined || resolved === null) {
+        console.warn(
+          `react-abode: Failed to resolve global reference "${attr.value}" for prop "${propName}"`
+        );
+        referenceProps[propName] = undefined;
+      } else {
+        referenceProps[propName] = resolved;
+      }
+    }
+  }
+  
+  return referenceProps;
+};
+
 export const getElementProps = (
   el: Element | HTMLScriptElement,
   options?: Options
 ): Props => {
-  const props: { [key: string]: string } = {};
+  // Priority 1: Check for data-props first (highest priority)
+  const dataPropsAttr = el.getAttribute('data-props');
+  if (dataPropsAttr) {
+    try {
+      const parsedProps = JSON.parse(dataPropsAttr);
+      if (typeof parsedProps === 'object' && parsedProps !== null && !Array.isArray(parsedProps)) {
+        // data-props found and successfully parsed, return early (ignore all other props)
+        return parsedProps;
+      }
+    } catch (e) {
+      console.warn(`react-abode: Failed to parse data-props attribute: ${(e as Error).message}`);
+      return {};
+    }
+  }
+
+  const props: { [key: string]: any } = {};
 
   if (el?.attributes) {
+    // Priority 2: Process data-n-prop-* attributes (numeric parsing)
+    const numericProps = getNumericProps(el);
+    Object.assign(props, numericProps);
+
+    // Priority 3: Process data-r-prop-* attributes (global reference parsing)
+    const referenceProps = getReferenceProps(el);
+    Object.assign(props, referenceProps);
+
+    // Priority 4: Process standard data-prop-* attributes (existing logic)
     const rawProps = Array.from(el.attributes).filter((attribute) =>
       attribute.name.startsWith('data-prop-')
     );
     for (const prop of rawProps) {
       const componentName = getComponentName(el) ?? '';
       const propName = getCleanPropName(prop.name);
+      
+      // Skip if already set by numeric or reference props (numeric/reference take precedence)
+      if (Object.prototype.hasOwnProperty.call(props, propName)) {
+        continue;
+      }
+      
       const propParser =
         options?.propParsers?.[propName] ??
         components[componentName]?.options?.propParsers?.[propName];

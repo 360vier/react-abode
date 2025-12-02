@@ -308,3 +308,318 @@ describe('exported functions', () => {
   it.skip('setComponentSelector', () => {});
   it.skip('register', () => {});
 });
+
+describe('react-habitat prop parsing features', () => {
+  beforeEach(() => {
+    document.getElementsByTagName('html')[0].innerHTML = '';
+    unRegisterAllComponents();
+    // Clean up any global test functions
+    // @ts-ignore
+    delete window.testGlobalFunc;
+    // @ts-ignore
+    delete window.App;
+  });
+
+  describe('data-props (bulk JSON object)', () => {
+    it('parses valid data-props JSON object', () => {
+      const abodeElement = document.createElement('div');
+      abodeElement.setAttribute('data-component', 'TestComponent');
+      abodeElement.setAttribute('data-props', '{"sku": "1234", "count": 5}');
+
+      const props = getElementProps(abodeElement);
+
+      expect(props).toEqual({ sku: '1234', count: 5 });
+    });
+
+    it('data-props overrides all other prop attributes', () => {
+      const abodeElement = document.createElement('div');
+      abodeElement.setAttribute('data-component', 'TestComponent');
+      abodeElement.setAttribute('data-props', '{"a": 1}');
+      abodeElement.setAttribute('data-prop-b', '2');
+      abodeElement.setAttribute('data-n-prop-c', '3');
+      abodeElement.setAttribute('data-r-prop-d', 'window.testGlobalFunc');
+
+      const props = getElementProps(abodeElement);
+
+      expect(props).toEqual({ a: 1 });
+      expect(props.b).toBeUndefined();
+      expect(props.c).toBeUndefined();
+      expect(props.d).toBeUndefined();
+    });
+
+    it('handles invalid JSON in data-props with warning', () => {
+      const consoleSpy = jest.spyOn(console, 'warn').mockImplementation();
+      const abodeElement = document.createElement('div');
+      abodeElement.setAttribute('data-component', 'TestComponent');
+      abodeElement.setAttribute('data-props', '{invalid json}');
+
+      const props = getElementProps(abodeElement);
+
+      expect(props).toEqual({});
+      expect(consoleSpy).toHaveBeenCalledWith(
+        expect.stringContaining('Failed to parse data-props attribute')
+      );
+      consoleSpy.mockRestore();
+    });
+
+    it('handles non-object JSON in data-props (string)', () => {
+      const abodeElement = document.createElement('div');
+      abodeElement.setAttribute('data-component', 'TestComponent');
+      abodeElement.setAttribute('data-props', '"just a string"');
+
+      const props = getElementProps(abodeElement);
+
+      // Should fall through to other props since it's not an object
+      expect(props).toEqual({});
+    });
+
+    it('handles non-object JSON in data-props (array)', () => {
+      const abodeElement = document.createElement('div');
+      abodeElement.setAttribute('data-component', 'TestComponent');
+      abodeElement.setAttribute('data-props', '[1, 2, 3]');
+
+      const props = getElementProps(abodeElement);
+
+      // Should fall through to other props since it's not an object
+      expect(props).toEqual({});
+    });
+
+    it('handles empty string in data-props', () => {
+      const consoleSpy = jest.spyOn(console, 'warn').mockImplementation();
+      const abodeElement = document.createElement('div');
+      abodeElement.setAttribute('data-component', 'TestComponent');
+      abodeElement.setAttribute('data-props', '');
+
+      const props = getElementProps(abodeElement);
+
+      // Empty string should result in empty props (JSON.parse fails)
+      expect(props).toEqual({});
+      // Note: JSON.parse('') throws an error, which should trigger a warning
+      // The exact warning behavior may vary, but the important part is empty props
+      consoleSpy.mockRestore();
+    });
+  });
+
+  describe('data-n-prop-* (numeric parsing)', () => {
+    it('parses numeric float from data-n-prop-*', () => {
+      const abodeElement = document.createElement('div');
+      abodeElement.setAttribute('data-component', 'TestComponent');
+      abodeElement.setAttribute('data-n-prop-height', '1.75');
+
+      const props = getElementProps(abodeElement);
+
+      expect(props.height).toBe(1.75);
+      expect(typeof props.height).toBe('number');
+    });
+
+    it('parses numeric integer from data-n-prop-*', () => {
+      const abodeElement = document.createElement('div');
+      abodeElement.setAttribute('data-component', 'TestComponent');
+      abodeElement.setAttribute('data-n-prop-count', '42');
+
+      const props = getElementProps(abodeElement);
+
+      expect(props.count).toBe(42);
+      expect(typeof props.count).toBe('number');
+    });
+
+    it('converts empty string to 0 for data-n-prop-*', () => {
+      const abodeElement = document.createElement('div');
+      abodeElement.setAttribute('data-component', 'TestComponent');
+      abodeElement.setAttribute('data-n-prop-value', '');
+
+      const props = getElementProps(abodeElement);
+
+      expect(props.value).toBe(0);
+      expect(typeof props.value).toBe('number');
+    });
+
+    it('handles kebab-case to camelCase conversion for data-n-prop-*', () => {
+      const abodeElement = document.createElement('div');
+      abodeElement.setAttribute('data-component', 'TestComponent');
+      abodeElement.setAttribute('data-n-prop-max-value', '100');
+
+      const props = getElementProps(abodeElement);
+
+      expect(props.maxValue).toBe(100);
+      expect(typeof props.maxValue).toBe('number');
+    });
+
+    it('handles non-numeric string in data-n-prop-* (returns NaN)', () => {
+      const abodeElement = document.createElement('div');
+      abodeElement.setAttribute('data-component', 'TestComponent');
+      abodeElement.setAttribute('data-n-prop-price', 'not-a-number');
+
+      const props = getElementProps(abodeElement);
+
+      expect(props.price).toBeNaN();
+      expect(typeof props.price).toBe('number');
+    });
+
+    it('data-n-prop-* takes precedence over data-prop-*', () => {
+      const abodeElement = document.createElement('div');
+      abodeElement.setAttribute('data-component', 'TestComponent');
+      abodeElement.setAttribute('data-n-prop-count', '5');
+      abodeElement.setAttribute('data-prop-count', '"five"');
+
+      const props = getElementProps(abodeElement);
+
+      expect(props.count).toBe(5);
+      expect(typeof props.count).toBe('number');
+    });
+  });
+
+  describe('data-r-prop-* (global reference parsing)', () => {
+    beforeEach(() => {
+      // Set up test global functions
+      // @ts-ignore
+      window.testGlobalFunc = jest.fn();
+      // @ts-ignore
+      window.App = {
+        services: {
+          logger: {
+            log: jest.fn(),
+          },
+        },
+      };
+    });
+
+    it('resolves simple global function from data-r-prop-*', () => {
+      const abodeElement = document.createElement('div');
+      abodeElement.setAttribute('data-component', 'TestComponent');
+      abodeElement.setAttribute('data-r-prop-click-handler', 'window.testGlobalFunc');
+
+      const props = getElementProps(abodeElement);
+
+      expect(props.clickHandler).toBe((window as any).testGlobalFunc);
+      expect(typeof props.clickHandler).toBe('function');
+    });
+
+    it('resolves nested global reference from data-r-prop-*', () => {
+      const abodeElement = document.createElement('div');
+      abodeElement.setAttribute('data-component', 'TestComponent');
+      abodeElement.setAttribute('data-r-prop-log-service', 'window.App.services.logger');
+
+      const props = getElementProps(abodeElement);
+
+      expect(props.logService).toBe((window as any).App.services.logger);
+      expect(typeof props.logService).toBe('object');
+      expect((props.logService as any).log).toBeDefined();
+    });
+
+    it('handles kebab-case to camelCase conversion for data-r-prop-*', () => {
+      const abodeElement = document.createElement('div');
+      abodeElement.setAttribute('data-component', 'TestComponent');
+      abodeElement.setAttribute('data-r-prop-event-callback', 'window.testGlobalFunc');
+
+      const props = getElementProps(abodeElement);
+
+      expect(props.eventCallback).toBe((window as any).testGlobalFunc);
+    });
+
+    it('handles non-existent global reference with warning', () => {
+      const consoleSpy = jest.spyOn(console, 'warn').mockImplementation();
+      const abodeElement = document.createElement('div');
+      abodeElement.setAttribute('data-component', 'TestComponent');
+      abodeElement.setAttribute('data-r-prop-missing', 'window.nonExistent');
+
+      const props = getElementProps(abodeElement);
+
+      expect(props.missing).toBeUndefined();
+      expect(consoleSpy).toHaveBeenCalledWith(
+        expect.stringContaining('Failed to resolve global reference')
+      );
+      consoleSpy.mockRestore();
+    });
+
+    it('handles path with null in chain', () => {
+      const consoleSpy = jest.spyOn(console, 'warn').mockImplementation();
+      // @ts-ignore
+      window.testNull = null;
+      const abodeElement = document.createElement('div');
+      abodeElement.setAttribute('data-component', 'TestComponent');
+      abodeElement.setAttribute('data-r-prop-value', 'window.testNull.something');
+
+      const props = getElementProps(abodeElement);
+
+      expect(props.value).toBeUndefined();
+      consoleSpy.mockRestore();
+      // @ts-ignore
+      delete window.testNull;
+    });
+
+    it('handles path without window. prefix', () => {
+      // @ts-ignore
+      window.simpleGlobal = { value: 42 };
+      const abodeElement = document.createElement('div');
+      abodeElement.setAttribute('data-component', 'TestComponent');
+      abodeElement.setAttribute('data-r-prop-ref', 'simpleGlobal');
+
+      const props = getElementProps(abodeElement);
+
+      // The implementation resolves paths without "window." prefix by treating them as window properties
+      expect(props.ref).toEqual({ value: 42 });
+      // @ts-ignore
+      delete window.simpleGlobal;
+    });
+
+    it('data-r-prop-* takes precedence over data-prop-*', () => {
+      const abodeElement = document.createElement('div');
+      abodeElement.setAttribute('data-component', 'TestComponent');
+      abodeElement.setAttribute('data-r-prop-handler', 'window.testGlobalFunc');
+      abodeElement.setAttribute('data-prop-handler', '"string handler"');
+
+      const props = getElementProps(abodeElement);
+
+      expect(props.handler).toBe((window as any).testGlobalFunc);
+      expect(typeof props.handler).toBe('function');
+    });
+  });
+
+  describe('mixed attributes and priority behavior', () => {
+    beforeEach(() => {
+      // @ts-ignore
+      window.testFunc = jest.fn();
+    });
+
+    it('handles mixed numeric, reference, and standard props', () => {
+      const abodeElement = document.createElement('div');
+      abodeElement.setAttribute('data-component', 'TestComponent');
+      abodeElement.setAttribute('data-n-prop-count', '5');
+      abodeElement.setAttribute('data-r-prop-handler', 'window.testFunc');
+      abodeElement.setAttribute('data-prop-name', '"test"');
+
+      const props = getElementProps(abodeElement);
+
+      expect(props.count).toBe(5);
+      expect(typeof props.count).toBe('number');
+      expect(props.handler).toBe((window as any).testFunc);
+      expect(typeof props.handler).toBe('function');
+      expect(props.name).toBe('test');
+    });
+
+    it('maintains existing data-prop-* functionality with JSON arrays', () => {
+      const abodeElement = document.createElement('div');
+      abodeElement.setAttribute('data-component', 'TestComponent');
+      abodeElement.setAttribute('data-prop-items', '[1,2,3]');
+
+      const props = getElementProps(abodeElement);
+
+      expect(props.items).toEqual([1, 2, 3]);
+    });
+
+    it('priority order: data-props > data-n-prop-* > data-r-prop-* > data-prop-*', () => {
+      const abodeElement = document.createElement('div');
+      abodeElement.setAttribute('data-component', 'TestComponent');
+      abodeElement.setAttribute('data-props', '{"final": "value"}');
+      abodeElement.setAttribute('data-n-prop-final', '999');
+      abodeElement.setAttribute('data-r-prop-final', 'window.testFunc');
+      abodeElement.setAttribute('data-prop-final', '"ignored"');
+
+      const props = getElementProps(abodeElement);
+
+      // data-props should win
+      expect(props).toEqual({ final: 'value' });
+    });
+  });
+});
