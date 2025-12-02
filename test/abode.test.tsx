@@ -18,7 +18,6 @@ import {
   populate,
   delay,
 } from '../src/abode';
-// @ts-ignore
 import TestComponent from './TestComponent';
 import TestComponentProps, { util } from './TestComponentProps';
 import 'mutationobserver-shim';
@@ -303,10 +302,18 @@ describe('exported functions', () => {
     );
   });
 
-  it.skip('getScriptProps', () => {});
-  it.skip('getActiveComponents', () => {});
-  it.skip('setComponentSelector', () => {});
-  it.skip('register', () => {});
+  it.skip('getScriptProps', () => {
+    // TODO: Implement test
+  });
+  it.skip('getActiveComponents', () => {
+    // TODO: Implement test
+  });
+  it.skip('setComponentSelector', () => {
+    // TODO: Implement test
+  });
+  it.skip('register', () => {
+    // TODO: Implement test
+  });
 });
 
 describe('react-habitat prop parsing features', () => {
@@ -314,10 +321,8 @@ describe('react-habitat prop parsing features', () => {
     document.getElementsByTagName('html')[0].innerHTML = '';
     unRegisterAllComponents();
     // Clean up any global test functions
-    // @ts-ignore
-    delete window.testGlobalFunc;
-    // @ts-ignore
-    delete window.App;
+    delete (window as any).testGlobalFunc;
+    delete (window as any).App;
   });
 
   describe('data-props (bulk JSON object)', () => {
@@ -472,10 +477,8 @@ describe('react-habitat prop parsing features', () => {
   describe('data-r-prop-* (global reference parsing)', () => {
     beforeEach(() => {
       // Set up test global functions
-      // @ts-ignore
-      window.testGlobalFunc = jest.fn();
-      // @ts-ignore
-      window.App = {
+      (window as any).testGlobalFunc = jest.fn();
+      (window as any).App = {
         services: {
           logger: {
             log: jest.fn(),
@@ -534,8 +537,7 @@ describe('react-habitat prop parsing features', () => {
 
     it('handles path with null in chain', () => {
       const consoleSpy = jest.spyOn(console, 'warn').mockImplementation();
-      // @ts-ignore
-      window.testNull = null;
+      (window as any).testNull = null;
       const abodeElement = document.createElement('div');
       abodeElement.setAttribute('data-component', 'TestComponent');
       abodeElement.setAttribute('data-r-prop-value', 'window.testNull.something');
@@ -544,13 +546,11 @@ describe('react-habitat prop parsing features', () => {
 
       expect(props.value).toBeUndefined();
       consoleSpy.mockRestore();
-      // @ts-ignore
-      delete window.testNull;
+      delete (window as any).testNull;
     });
 
     it('handles path without window. prefix', () => {
-      // @ts-ignore
-      window.simpleGlobal = { value: 42 };
+      (window as any).simpleGlobal = { value: 42 };
       const abodeElement = document.createElement('div');
       abodeElement.setAttribute('data-component', 'TestComponent');
       abodeElement.setAttribute('data-r-prop-ref', 'simpleGlobal');
@@ -559,8 +559,7 @@ describe('react-habitat prop parsing features', () => {
 
       // The implementation resolves paths without "window." prefix by treating them as window properties
       expect(props.ref).toEqual({ value: 42 });
-      // @ts-ignore
-      delete window.simpleGlobal;
+      delete (window as any).simpleGlobal;
     });
 
     it('data-r-prop-* takes precedence over data-prop-*', () => {
@@ -578,8 +577,7 @@ describe('react-habitat prop parsing features', () => {
 
   describe('mixed attributes and priority behavior', () => {
     beforeEach(() => {
-      // @ts-ignore
-      window.testFunc = jest.fn();
+      (window as any).testFunc = jest.fn();
     });
 
     it('handles mixed numeric, reference, and standard props', () => {
